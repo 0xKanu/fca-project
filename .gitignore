@@ -1,0 +1,12 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+
+# Generated corpus artifacts (reproducible via scraper, bulky)
+data/pdfs/
+data/html/
+data/metadata/
+data/text/
+data/logs/
