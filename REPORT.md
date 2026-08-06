@@ -99,6 +99,30 @@ attachments via `NON_PDF_EXT = {.xlsx, .xls, .csv, .ods, .docx, .doc}` logged to
 **`README.md`** documents layout, commands, the pipeline, the defensible
 decisions, and caveats.
 
+**`extract.py` — text extraction.** Converts every capture to plain text in
+`data/text/<stem>.txt`, keyed by the same stem as the sidecars (the join key).
+PDFs use `pypdf` with an empty-password decrypt — the FCA encrypts its PDFs with
+AES, so `cryptography` is required (a missing dep initially caused ~280 PDFs to
+"fail", which was actually pypdf declining to decrypt). HTML snapshots are
+cleaned of nav/footer/script chrome via `html_to_text`. Idempotent (existing
+.txt skipped); low-text outputs are flagged, not silently dropped.
+
+**`sample.py` — stratified labelling sample.** Draws a reproducible
+(`random.Random(seed=42)`) sample stratified by doc_type × publication year,
+with proportional allocation and a floor of one per non-empty stratum. Writes
+`data/labelling/sample.csv` (empty `label` column) + JSONL.
+
+**`label_draft.py` — heuristic pre-labels.** Doc-type + title-keyword rules
+that produce a best-guess label per sampled document (CP→consultation, FG→
+guidance, HN→amendment, PS→amendment/new_rule by keyword, plus Q&A/feedback/
+withdrawal rules). Outputs `draft_labels.jsonl`; explicitly a starting point
+for humans to confirm, not ground truth.
+
+**`storage.py` — GCS upload (Phase 4).** OFF by default (`--upload` or
+`FCA_GCS_UPLOAD=1` required). `google-cloud-storage` is an optional
+extra (deferred import with a friendly error); uploads `data/text` and
+optionally `data/pdfs`/`data/html` mirroring the local layout.
+
 ## 3. Engineering decisions worth defending
 
 | Decision | Rationale |
@@ -169,7 +193,30 @@ decisions, and caveats.
 
 10. **Duplicate exclusion log entries.** `excluded.jsonl` is **append-mode**,
     so re-runs logged each excluded record twice (30 lines → 15 unique).
-    Cosmetic but confusing when reading logs.
+    Cosmetic but confusing when reading logs. Fixed with `log_excluded_if_new`,
+    which dedupes on `landing_url` before appending.
+
+11. **Extraction: pypdf silently "failed" on ~280 PDFs.** The FCA encrypts its
+    PDFs with AES; without `cryptography` installed pypdf raises
+    `DependencyError` on the first decrypt. All 286 PDFs extracted cleanly
+    once `cryptography` was installed and `reader.decrypt("")` was applied.
+
+12. **Extraction: `Tag.attrs` can be `None`.** The HTML cleaner used
+    `el.get("class", [])`, which crashes on real FCA pages (lxml builder
+    produces some tags with `attrs=None`). Fixed with `(el.attrs or {}).get(...)`;
+    the unit test's hand-written HTML never hit this — only the live pages did.
+
+13. **Extraction: a summary-regex bug flagged 234 "scanned" PDFs.** The low-text
+    check used `(\d+),?\d* chars`, so for "12,345 chars" it read group(1)="12"
+    and flagged everything ≥1000 chars as low-text. Fixed to `([\d,]+)` with
+    comma-stripping.
+
+14. **JS-rendered HTML snapshots are content-empty.** 11 of the 19 HTML-only
+    docs (Primary Market Bulletins, some Q&As) render their content via
+    JavaScript, so the HTTP snapshot holds only the page shell (e.g. FG25/6
+    → 44 chars). Capturing their real text needs a browser renderer
+    (Playwright/Selenium); documented as an open caveat rather than silently
+    dropped.
 
 Also worth noting: **UTF-8/encoding** was explicitly handled
 (`ensure_ascii=False`, `encoding="utf-8"`) after titles with non-ASCII
@@ -192,18 +239,15 @@ characters (em-dashes, etc.) risked corruption.
 
 ## 6. Residual caveats (still open)
 
-- **Empty `scraper/tests/`** — contains only `__init__.py`; the test suite was
-  stubbed but never filled. No automated verification.
-- **No git repo / not committed yet.**
-- **`excluded.jsonl` accumulates duplicated lines across runs** (see pitfall 10).
-- **HTML snapshots need cleaning for text extraction** (PMBs/Q&As carry
-  boilerplate buried in the page).
+- **11 HTML-only docs (PMBs, some Q&As) have near-empty text** — JS-rendered
+  content that HTTP snapshots can't capture; needs a browser renderer.
 - **`construct_pdf_url` performs an extra probe request per record** —
   acceptable given the rate limit, but a known request-count cost.
-- **Heuristics are best-effort**: `_is_sub_document` and `external_read_link`
-  are path/title based; edge cases could be misclassified (annex PDFs get
-  slug names — which is correct behaviour).
-- **Text extraction and GCS upload (Phase 4) not yet implemented.**
+- **Heuristics are best-effort**: `_is_sub_document`, `external_read_link` and
+  the draft label rules are path/title/keyword based; edge cases need human
+  confirmation (which is exactly what the labelling step is for).
+- **GCS upload is written but not exercised** — no credentials/bucket in this
+  environment; `google-cloud-storage` is an optional extra.
 
 ## 7. Recommended next steps (and why)
 
@@ -241,6 +285,18 @@ classifier); the rest are hygiene.
      fixtures);
    - make `excluded.jsonl` idempotent (dedupe on write) so logs stay readable.
 
-**Bottom line:** start with **text extraction**, because it unblocks sampling,
-labelling, and training — and it will surface any corrupted/scanned PDFs while
-the corpus is still easy to re-fetch.
+**Bottom line:** the corpus (320 docs, 305 plain-text captures) is built,
+extracted, sampled and pre-labelled. The remaining human-in-the-loop step is
+confirming/refining the 180 draft labels in `data/labelling/sample.csv` against
+the taxonomy, then committing them as `data/labelling/labels.csv` — the
+training set for the classifier.
+
+## Status of the five recommended steps
+
+| # | Step | Status |
+|---|---|---|
+| 1 | Text extraction (PDF+HTML → `data/text/`) | Done — 305/305, 0 failures (11 JS-rendered HTML docs near-empty, flagged) |
+| 2 | Stratified sample 150–200 docs for labelling | Done — 180 docs in `data/labelling/sample.csv` |
+| 3 | Change-type taxonomy + labelling schema + draft labels | Done — `TAXONOMY.md`, `labelling_instructions.md`, `draft_labels.jsonl` (heuristic, needs human review) |
+| 4 | GCS upload (`storage.py`, off by default) | Done — written + tested off; needs bucket/creds to run |
+| 5 | Housekeeping (git init, tests, idempotent excluded log) | Done — committed `29b3713`, 15 unittest cases, excluded-log dedup |

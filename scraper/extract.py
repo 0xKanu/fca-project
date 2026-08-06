@@ -60,7 +60,8 @@ def html_to_text(html: str) -> str:
     for tag in soup(NOISE_TAGS):
         tag.decompose()
     for el in soup.select("[class]"):
-        if NOISE_CLASS_RE.search(" ".join(el.get("class", []))):
+        classes = (el.attrs or {}).get("class", [])
+        if NOISE_CLASS_RE.search(" ".join(classes)):
             el.decompose()
     text = soup.get_text(" ", strip=True)
     return re.sub(r"\s+", " ", text).strip()
@@ -107,7 +108,7 @@ def run_extract() -> dict[str, Any]:
                 stats["skipped"] += 1
             else:
                 stats["extracted"] += 1
-                m = re.match(r"(\d+),?\d* chars", msg)
+                m = re.match(r"([\d,]+) chars", msg)
                 if m and int(m.group(1).replace(",", "")) < LOW_TEXT_CHARS:
                     stats["low_text"].append(os.path.splitext(sidecar.get("filename", ""))[0])
         else:

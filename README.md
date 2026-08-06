@@ -13,11 +13,18 @@ scraper/
   index.py          Level 1 orchestrator: paginate, dedupe, write index
   parse_landing.py  Level 2: landing page -> primary PDF URL
   download.py       Level 3: download PDFs + JSON sidecars
+  extract.py        PDF/HTML -> plain text (data/text/)
+  sample.py         stratified labelling sample (data/labelling/)
+  label_draft.py    heuristic draft labels for the sample
+  storage.py        optional GCS upload (off by default)
 data/
   index/            index_all.jsonl / .csv   (source of truth)
   pdfs/             <REF>.pdf (e.g. PS25_20.pdf) or <url-slug>.pdf
-  metadata/         one .json sidecar per PDF (provenance + sha256)
-  logs/             no_pdf.jsonl, failures.jsonl
+  html/             HTML snapshots (PMBs, Q&As, external-hosted docs)
+  metadata/         one .json sidecar per capture (provenance + sha256)
+  text/             one .txt per capture (plain-text corpus for the classifier)
+  labelling/        sample + taxonomy + draft labels for the labelling step
+  logs/             excluded.jsonl
 ```
 
 ## Commands
@@ -29,6 +36,18 @@ python -m scraper.index
 # Download the PDFs (Levels 2+3). Idempotent — safe to re-run (skips).
 python -m scraper.download            # all
 python -m scraper.download --limit 5  # subset for a pilot
+
+# Extract plain text from every capture (PDF + HTML) into data/text/.
+python -m scraper.extract
+
+# Draw a stratified labelling sample (180 docs) into data/labelling/.
+python -m scraper.sample --size 180
+
+# Heuristic draft labels for the sample (human review still required).
+python -m scraper.label_draft
+
+# Optional GCS upload (OFF by default — pass --upload to act).
+python -m scraper.storage --bucket my-bucket
 ```
 
 ## How the scrapers work
@@ -78,5 +97,9 @@ skipped; `.xlsx`/spreadsheet attachments are logged as excluded.
 
 - ~15 spreadsheet attachments (`.xlsx` reporting/exposure templates) are
   excluded by design and logged in `data/logs/excluded.jsonl`.
+- **HTML-only documents that render content via JavaScript** (Primary Market
+  Bulletins, some Q&As) are captured as HTTP snapshots that contain only the
+  page shell (~11 docs in `data/text/` have near-empty text). Extracting their
+  real content requires a browser renderer (Playwright/Selenium).
 - Excludes speeches, newsletters, Dear-CEO letters and research notes by
   design (they muddy change-type classification); noted as future work.
