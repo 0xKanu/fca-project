@@ -1,10 +1,11 @@
-"""Zero-shot LLM classifier via Groq (llama-3.3-70b-versatile).
+"""Zero-shot LLM classifier via Groq.
 
 USER OWNS THE PROMPT (the intellectual part); this module owns the mechanical
 JSON handling (structured output, validation, retries, rate-limiting).
 
 Run:
     GROQ_API_KEY=... python -m classifiers.zero_shot [--limit 5] [--sleep 1.0]
+    GROQ_API_KEY=... python -m classifiers.zero_shot --models
 
 Output: data/predictions/zero_shot.csv  (stem, label, confidence)
 """
@@ -14,10 +15,15 @@ import argparse
 import json
 import os
 import time
+from pathlib import Path
 
 from .data_utils import LABELS, load_meta, load_text, usable_stems, write_predictions
 
-MODEL = os.environ.get("ZERO_SHOT_MODEL", "llama-3.3-70b-versatile")
+# Groq retired llama-3.3-70b-versatile on 2026-08-16 (see
+# console.groq.com/docs/deprecations); gpt-oss-120b is the named replacement and
+# is preferred for JSON-mode reliability. Override with --model or ZERO_SHOT_MODEL.
+DEFAULT_MODEL = "openai/gpt-oss-120b"
+MODEL = os.environ.get("ZERO_SHOT_MODEL", DEFAULT_MODEL)
 
 SYSTEM_PROMPT = (
     "You are a regulatory analyst classifying Financial Conduct Authority (FCA) "
@@ -56,13 +62,21 @@ def build_prompt(doc_type: str, text: str) -> str:
 
 
 def _extract_label(payload: str) -> tuple[str, float, str]:
-    """Robustly extract (label, confidence, evidence) from a model payload."""
+    """Robustly extract (label, confidence, evidence) from a model payload.
+
+    gpt-oss models are reasoning models and may emit a prose preamble before
+    the JSON object, so we parse the first '{' to the last '}' rather than the
+    whole payload.
+    """
     payload = payload.strip()
     if payload.startswith("```"):
         payload = payload.strip("`")
         if payload.startswith("json"):
             payload = payload[4:]
-    data = json.loads(payload)
+    start, end = payload.find("{"), payload.rfind("}")
+    if start == -1 or end == -1 or end < start:
+        raise ValueError(f"no JSON object in payload: {payload[:120]!r}")
+    data = json.loads(payload[start : end + 1])
     if isinstance(data, dict):
         label = str(data.get("label", "")).strip().lower()
         conf = float(data.get("confidence", 0.0))
@@ -71,7 +85,7 @@ def _extract_label(payload: str) -> tuple[str, float, str]:
     raise ValueError(f"payload is not an object: {payload[:120]!r}")
 
 
-def classify_doc(client, doc_type: str, text: str) -> tuple[str, float, str]:
+def classify_doc(client, doc_type: str, text: str, model: str) -> tuple[str, float, str]:
     """One zero-shot call with one retry on malformed/off-label output."""
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -79,7 +93,7 @@ def classify_doc(client, doc_type: str, text: str) -> tuple[str, float, str]:
     ]
     for attempt in range(2):
         resp = client.chat.completions.create(
-            model=MODEL,
+            model=model,
             messages=messages,
             temperature=0,
             max_tokens=200,
@@ -102,20 +116,42 @@ def classify_doc(client, doc_type: str, text: str) -> tuple[str, float, str]:
     return "unknown", 0.0, "failed to produce a valid label"
 
 
+def _resolve_key() -> str | None:
+    """GROQ_API_KEY env var, else ~/.groq/key file (chmod 600)."""
+    key = os.environ.get("GROQ_API_KEY")
+    if key:
+        return key
+    keyfile = Path.home() / ".groq" / "key"
+    if keyfile.exists():
+        return keyfile.read_text().strip()
+    return None
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--max-chars", type=int, default=2000)
     ap.add_argument("--limit", type=int, default=0, help="0 = all usable docs")
     ap.add_argument("--sleep", type=float, default=1.0, help="seconds between calls")
+    ap.add_argument("--model", default=MODEL, help=f"Groq model id (default: {DEFAULT_MODEL})")
+    ap.add_argument("--models", action="store_true", help="list models your account can access, then exit")
     args = ap.parse_args()
 
-    key = os.environ.get("GROQ_API_KEY")
+    key = _resolve_key()
     if not key:
-        raise SystemExit("GROQ_API_KEY is not set. Run with: GROQ_API_KEY=... python -m classifiers.zero_shot")
+        raise SystemExit(
+            "GROQ_API_KEY is not set and ~/.groq/key is missing.\n"
+            "Run with: GROQ_API_KEY=... python -m classifiers.zero_shot\n"
+            "or save the key once:  mkdir -p ~/.groq && printf '%s' \"$GROQ_API_KEY\" > ~/.groq/key && chmod 600 ~/.groq/key"
+        )
 
     from groq import Groq
 
     client = Groq(api_key=key)
+
+    if args.models:
+        for m in client.models.list().data:
+            print(m.id)
+        return
 
     meta = load_meta()
     stems = usable_stems()
@@ -126,7 +162,7 @@ def main():
     for i, stem in enumerate(stems, 1):
         text = load_text(stem, args.max_chars)
         doc_type = meta[stem].get("doc_type", "PS")
-        label, conf, ev = classify_doc(client, doc_type, text)
+        label, conf, ev = classify_doc(client, doc_type, text, args.model)
         preds[stem] = label
         confs[stem] = conf
         print(f"[{i}/{len(stems)}] {stem:36s} -> {label:12s} conf={conf:.2f} | {ev[:60]}")
