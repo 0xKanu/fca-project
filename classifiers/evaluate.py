@@ -119,6 +119,21 @@ def write_report(methods: list[dict]):
             + ("..." if len(wrong) > 12 else "")
         )
 
+    disagreements = """### Persistent zero-shot disagreements (prompt v1.1)
+Prompt v1.1 added three decision rules (technical annex -> guidance; final rules on an
+existing regime -> amendment; label by headline action). The 179-doc run was byte-for-byte
+identical to v1 (acc 0.872, macro-F1 0.680), so the flagged cases are NOT prompt-fixable
+errors but genuine human-vs-model disagreements, each with defensible model reasoning:
+- `PS23_5` (true amendment) -> `new_rule` 0.75: model cites "final rules that ban referral
+  fees, creating new obligations". Arguable: the ban is a new obligation on debt packagers.
+- `cp25_27_technical_annex_3` (true guidance) -> `consultation` 0.98: model weighs the
+  document's parent CP25/27 consultation framing over its annex nature. Taxonomy rule 6
+  says annex -> guidance; model disagrees.
+- `PS24_14` (true amendment) -> `consultation` 0.95: model weights the paper's
+  "asks for comments on a discussion paper" element over its final rules.
+These are recorded as documented disagreements rather than tuned away, to avoid
+over-fitting the prompt to individual documents (which would inflate the eval)."""
+
     report = f"""# RQ2 - Three-way classifier comparison
 
 ## Question
@@ -158,11 +173,24 @@ Per-class F1:
 
 {chr(10).join(err_lines)}
 
+{disagreements}
+
 ## Caveats (read before citing)
 - `new_rule` has only 16 samples; recall for it is weak in every method.
   The small-N classes are the binding constraint, not the modelling.
 - `no_change` (0 samples) cannot be evaluated - none of the methods can learn
   or be scored on it.
+- **fine_tuned macro-F1** is 0.316 as scored here (macro-F1 over the full
+  5-label set on concatenated out-of-fold predictions). The Colab notebook's
+  own per-fold macro-F1 averaged 0.395 - the difference is that the notebook
+  averages per-fold macro-F1 (classes with zero recall are folded in only if
+  present in that fold's validation), while this harness averages the class
+  F1s (new_rule=0, guidance=0, no_change=0) across all 179 predictions. Both
+  are reported; this harness is the canonical scorer for the comparison.
+- fine_tuned never predicts `new_rule` or `guidance` - with 179 docs it
+  collapses to the two majority classes (amendment/consultation), the classic
+  small-data overfit. This is why Method C is presented as an *attempted*
+  third method.
 - 5 labelled rows are low-confidence (3 JS-rendered PMBs, 1 overview doc,
   1 text-mismatch) - see `data/labelling/labels.csv` notes.
 - Methods are compared as-is; no hyperparameter search beyond defaults.

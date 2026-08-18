@@ -17,7 +17,16 @@ import os
 import time
 from pathlib import Path
 
-from .data_utils import LABELS, load_meta, load_text, usable_stems, write_predictions
+from .data_utils import (
+    LABELS,
+    append_predictions,
+    load_meta,
+    load_predictions,
+    load_text,
+    read_stems_file,
+    usable_stems,
+    write_predictions,
+)
 
 # Groq retired llama-3.3-70b-versatile on 2026-08-16 (see
 # console.groq.com/docs/deprecations); gpt-oss-120b is the named replacement and
@@ -140,6 +149,12 @@ def main():
     ap.add_argument("--limit", type=int, default=0, help="0 = all usable docs")
     ap.add_argument("--sleep", type=float, default=1.0, help="seconds between calls")
     ap.add_argument("--model", default=MODEL, help=f"Groq model id (default: {DEFAULT_MODEL})")
+    ap.add_argument(
+        "--stems-file",
+        default=None,
+        help="newline-separated list of stems to classify (appends to the "
+        "existing zero_shot.csv, skipping stems already predicted)",
+    )
     ap.add_argument("--models", action="store_true", help="list models your account can access, then exit")
     args = ap.parse_args()
 
@@ -161,14 +176,23 @@ def main():
         return
 
     meta = load_meta()
-    stems = usable_stems()
+    if args.stems_file:
+        stems = read_stems_file(args.stems_file)
+        # idempotent: skip any stem already predicted
+        already = load_predictions("zero_shot")
+        stems = [s for s in stems if s not in already]
+        if not stems:
+            print("No new stems to classify (all already predicted).")
+            return
+    else:
+        stems = usable_stems()
     if args.limit:
         stems = stems[: args.limit]
 
     preds, confs = {}, {}
     for i, stem in enumerate(stems, 1):
         text = load_text(stem, args.max_chars)
-        doc_type = meta[stem].get("doc_type", "PS")
+        doc_type = meta.get(stem, {}).get("doc_type", "PS")
         label, conf, ev = classify_doc(client, doc_type, text, args.model)
         preds[stem] = label
         confs[stem] = conf
@@ -176,7 +200,10 @@ def main():
         if i < len(stems):
             time.sleep(args.sleep)
 
-    out = write_predictions("zero_shot", preds, confs)
+    if args.stems_file:
+        out = append_predictions("zero_shot", preds, confs)
+    else:
+        out = write_predictions("zero_shot", preds, confs)
     print(f"\nWrote {len(preds)} predictions -> {out}")
 
 

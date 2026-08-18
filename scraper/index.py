@@ -16,7 +16,7 @@ import json
 import logging
 import os
 import time
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from scraper import config
@@ -144,6 +144,71 @@ def write_index(records: list[dict[str, Any]], label: str) -> tuple[str, str]:
     return jsonl_path, csv_path
 
 
+# --------------------------------------------------------------------------
+# Incremental detection (--incremental)
+# --------------------------------------------------------------------------
+
+def load_index_jsonl(path: str) -> list[dict[str, Any]]:
+    """Load a JSONL index (missing/empty file -> empty list)."""
+    if not os.path.exists(path):
+        return []
+    with open(path, encoding="utf-8") as f:
+        return [json.loads(line) for line in f if line.strip()]
+
+
+def _pub_date(rec: dict[str, Any]) -> date | None:
+    """Normalise a record's published_date to a naive date (ISO YYYY-MM-DD)."""
+    value = rec.get("published_date")
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value).date()
+    except (TypeError, ValueError):
+        return None
+
+
+def _dedupe_key(rec: dict[str, Any]) -> tuple[str, str]:
+    """Stable dedupe/seen key: reference, else landing URL."""
+    ref = rec.get("reference")
+    if ref:
+        return ("ref", ref)
+    return ("url", rec.get("landing_url", ""))
+
+
+def select_incremental(
+    new_records: list[dict[str, Any]], existing_records: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Return records that are new: published after the latest existing date
+    OR whose reference/URL was not previously seen. Dedupes the result.
+
+    If there is no prior index, every record is new.
+    """
+    seen: set[tuple[str, str]] = set()
+    latest: datetime.date | None = None
+    for rec in existing_records:
+        seen.add(_dedupe_key(rec))
+        d = _pub_date(rec)
+        if d is not None and (latest is None or d > latest):
+            latest = d
+
+    out: list[dict[str, Any]] = []
+    seen_new: set[tuple[str, str]] = set()
+    for rec in new_records:
+        key = _dedupe_key(rec)
+        if key in seen_new:
+            continue
+        d = _pub_date(rec)
+        # New if: reference/URL never seen before, OR a seen reference has been
+        # re-published with a date newer than anything we already captured.
+        is_new = key not in seen or (
+            d is not None and latest is not None and d > latest
+        )
+        if is_new:
+            seen_new.add(key)
+            out.append(rec)
+    return out
+
+
 def build_index() -> dict[str, Any]:
     """Run Level 1 for all doc types and return a summary dict."""
     session = FetchSession()
@@ -173,11 +238,39 @@ def build_index() -> dict[str, Any]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build the FCA document index.")
+    parser.add_argument(
+        "--incremental",
+        action="store_true",
+        help="only index records newer than the existing index_all.jsonl "
+        "(or with a reference not already seen); writes data/index/index_new.* "
+        "and appends to index_all.*; exits 0 with a message if nothing is new",
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
     logging.basicConfig(
         level=logging.INFO if args.verbose else logging.WARNING,
     )
+
+    if args.incremental:
+        existing = load_index_jsonl(os.path.join(config.INDEX_DIR, "index_all.jsonl"))
+        new_records = []
+        session = FetchSession()
+        for doc_type in config.DOC_TYPES:
+            new_records.extend(paginate_category(session, doc_type))
+        fresh = dedupe_by_reference(new_records)
+        delta = select_incremental(fresh, existing)
+        if not delta:
+            print("No new publications.")
+            return
+        combined = existing + delta
+        write_index(combined, "all")
+        write_index(delta, "new")
+        print("\n=== INCREMENTAL INDEX ===")
+        print(f"existing: {len(existing)}  new: {len(delta)}  total: {len(combined)}")
+        print("New:", ", ".join(r.get("reference") or r.get("landing_url", "") for r in delta))
+        print("Wrote:", os.path.join(config.INDEX_DIR, "index_new.jsonl"))
+        return
+
     summary = build_index()
 
     print("\n=== INDEX BUILD SUMMARY ===")

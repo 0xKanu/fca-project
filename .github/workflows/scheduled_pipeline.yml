@@ -1,0 +1,60 @@
+# Scheduled FCA monitoring pipeline (cloud-native option).
+#
+# TRIGGER: workflow_dispatch ONLY. The 6-hourly schedule below is deliberately
+# commented out so this does not fire unattended and burn Actions minutes.
+#
+# Why 6-hourly: the FCA publishes only a few documents per week, on business
+# days. 6-hourly polling bounds detection-to-classification latency to a few
+# hours while keeping load and cost trivial.
+#
+# To ENABLE production scheduling:
+#   1. Uncomment the `schedule` block.
+#   2. The runner starts from an EMPTY data/ (data/ is gitignored), so with no
+#      prior index the first run treats everything as new. Either:
+#        (a) commit data/index/index_all.jsonl (+ data/text/) to the repo, or
+#        (b) restore the corpus first via `scraper/storage.py` download.
+#   3. Add repo secrets: GROQ_API_KEY, and GCS_BUCKET/GCS_PREFIX + a
+#      service-account credential (GOOGLE_APPLICATION_CREDENTIALS) if you
+#      upload to GCS.
+name: scheduled-pipeline
+
+on:
+  workflow_dispatch:
+  # schedule:
+  #   - cron: "0 */6 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    env:
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      GCS_BUCKET: ${{ secrets.GCS_BUCKET }}
+      GCS_PREFIX: ${{ secrets.GCS_PREFIX }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install groq scikit-learn
+
+      - name: Run detect -> capture -> extract -> classify pipeline
+        run: python -m scraper.run_pipeline --method zero_shot
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pipeline-state
+          path: |
+            data/index/
+            data/predictions/
+            data/logs/

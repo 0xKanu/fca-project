@@ -60,6 +60,8 @@ def _enabled(args: argparse.Namespace) -> bool:
 
 _UPLOAD_GROUPS = [
     ("text", config.TEXT_DIR, True),
+    ("index", config.INDEX_DIR, True),
+    ("predictions", config.PREDICTIONS_DIR, True),
     ("pdfs", config.PDFS_DIR, False),
     ("html", config.HTML_DIR, False),
 ]

@@ -70,7 +70,6 @@ errors but genuine human-vs-model disagreements, each with defensible model reas
   says annex -> guidance; model disagrees.
 - `PS24_14` (true amendment) -> `consultation` 0.95: model weights the paper's
   "asks for comments on a discussion paper" element over its final rules.
-
 These are recorded as documented disagreements rather than tuned away, to avoid
 over-fitting the prompt to individual documents (which would inflate the eval).
 

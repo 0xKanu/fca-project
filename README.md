@@ -1,7 +1,17 @@
-# FCA Policy & Guidance Scraper
+# FCA Policy & Guidance Scraper — Automated Regulatory Change Detection
 
 Downloads FCA Policy Statements (PS), Consultation Papers (CP), Finalised
-Guidance (FG) and Handbook notices published 2023-01-01 to the run date.
+Guidance (FG) and Handbook notices published 2023-01-01 to the run date, and
+classifies each by **type of regulatory change** (`new_rule`, `amendment`,
+`consultation`, `guidance`, `no_change`).
+
+**Positioning (fintech).** The pipeline monitors the FCA — the UK regulator —
+as the source of truth for changes firms must track. Fintech is the
+highest-exposure sector: the corpus includes the cryptoasset regime, stablecoin
+rules, tokenisation, open banking, payments and consumer-credit documents.
+The monitoring pipeline and its RQ2 classifier comparison are the research
+deliverables; the fintech lens is the application narrative, not a separate
+dataset.
 
 ## Layout
 
@@ -17,13 +27,27 @@ scraper/
   sample.py         stratified labelling sample (data/labelling/)
   label_draft.py    heuristic draft labels for the sample
   storage.py        optional GCS upload (off by default)
+  run_pipeline.py   one-command detect -> capture -> extract -> classify
+classifiers/
+  keywords.py       user-owned keyword lists (rule-based baseline)
+  rule_based.py     Method A: deterministic keyword/taxonomy classifier
+  zero_shot.py      Method B: Groq LLM zero-shot classifier (default)
+  evaluate.py       shared evaluation harness -> REPORT_RQ2.md
+  data_utils.py     shared loading / prediction IO
+notebooks/
+  fine_tune_colab.ipynb   Method C: DistilBERT fine-tune (runs on Colab)
+scripts/
+  fca_pipeline.sh   cron wrapper around run_pipeline.py
+.github/workflows/
+  scheduled_pipeline.yml   cloud-native alternative (workflow_dispatch only)
 data/
   index/            index_all.jsonl / .csv   (source of truth)
   pdfs/             <REF>.pdf (e.g. PS25_20.pdf) or <url-slug>.pdf
   html/             HTML snapshots (PMBs, Q&As, external-hosted docs)
   metadata/         one .json sidecar per capture (provenance + sha256)
   text/             one .txt per capture (plain-text corpus for the classifier)
-  labelling/        sample + taxonomy + draft labels for the labelling step
+  labelling/        sample + taxonomy + labels.csv (180 labelled docs)
+  predictions/      per-method predictions, metrics, latency_log.jsonl
   logs/             excluded.jsonl
 ```
 
@@ -32,6 +56,9 @@ data/
 ```bash
 # Build / refresh the index (Level 1). Does NOT download anything.
 python -m scraper.index
+
+# Incremental: only new publications since the last index (delta -> index_new).
+python -m scraper.index --incremental
 
 # Download the PDFs (Levels 2+3). Idempotent — safe to re-run (skips).
 python -m scraper.download            # all
@@ -47,8 +74,72 @@ python -m scraper.sample --size 180
 python -m scraper.label_draft
 
 # Optional GCS upload (OFF by default — pass --upload to act).
-python -m scraper.storage --bucket my-bucket
+python -m scraper.storage --upload --bucket my-bucket [--prefix fca-corpus]
+
+# --- RQ2 classifiers ---
+python -m classifiers.rule_based              # Method A: full run -> data/predictions/rule_based.csv
+GROQ_API_KEY=... python -m classifiers.zero_shot   # Method B: full run (see --models to list your tier)
+python -m classifiers.evaluate                # regenerate REPORT_RQ2.md comparison
+
+# --- Automated monitoring (Phase 2) ---
+python -m scraper.run_pipeline                # detect -> capture -> extract -> classify
+python -m scraper.run_pipeline --method rule_based --upload --bucket my-bucket
 ```
+
+## One-command monitoring pipeline
+
+`python -m scraper.run_pipeline` chains the existing stages as subprocesses and
+**stops when there is nothing new**:
+
+```
+index --incremental -> download (delta only) -> extract -> predict (zero_shot)
+```
+
+- Prediction is **idempotent**: stems already in `data/predictions/<method>.csv`
+  are skipped, so re-runs never duplicate.
+- Per-document failures are handled inside each stage (logged to
+  `data/logs/`, run continues); only a stage-level failure aborts.
+- **Latency instrumentation (RQ3):** every newly detected document is appended
+  to `data/predictions/latency_log.jsonl` with `{stem, reference,
+  published_date, detected_at, classified_at}` (UTC), so detection-to-
+  classification latency can be computed and compared against a manual
+  weekly-monitoring baseline.
+
+### Scheduling
+
+**Option 1 — local cron** (`scripts/fca_pipeline.sh`):
+
+```cron
+0 */6 * * *  cd /home/you/fca_project && ./scripts/fca_pipeline.sh >> data/logs/cron.out 2>&1
+```
+
+**Why 6-hourly:** the FCA publishes only a few documents per week, on business
+days. 6-hourly polling bounds detection latency to a few hours while keeping
+load and Groq cost negligible.
+
+**Option 2 — GitHub Actions** (`scheduled_pipeline.yml`): the cloud-native
+alternative. It is shipped **`workflow_dispatch`-only** (the 6-hourly `schedule`
+is commented out) so it never fires unattended and burns Actions minutes. To
+enable production cron, follow the steps in the workflow file's header: the
+runner starts from an empty `data/` (gitignored), so you must commit the index
+and set `GROQ_API_KEY`/`GCS_BUCKET` secrets first.
+
+## Classifier comparison (RQ2)
+
+Three methods are compared on 179 labelled docs; the report is `REPORT_RQ2.md`.
+
+| method | accuracy | macro-F1 | notes |
+|---|---|---|---|
+| majority baseline | 0.436 | — | naive reference |
+| rule_based | 0.816 | 0.596 | keyword matching (`keywords.py`, user-owned) |
+| zero_shot | 0.872 | 0.680 | Groq `openai/gpt-oss-120b`, taxonomy prompt |
+| fine_tuned | 0.693 | 0.316 | DistilBERT 5-fold CV (Colab) — attempted third method |
+
+Evaluation protocol is deliberately asymmetric and documented: rule_based and
+zero_shot use no labels at inference and are scored on all usable docs; the
+fine-tuned model trains on labels so it is scored out-of-fold via stratified
+5-fold CV. The pre-committed fallback (two rigorous methods answer RQ2) is
+honoured in the report.
 
 ## How the scrapers work
 

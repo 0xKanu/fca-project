@@ -8,7 +8,16 @@ from __future__ import annotations
 import argparse
 import re
 
-from .data_utils import PRED_DIR, load_meta, usable_stems, write_predictions
+from .data_utils import (
+    PRED_DIR,
+    append_predictions,
+    load_meta,
+    load_predictions,
+    load_text,
+    read_stems_file,
+    usable_stems,
+    write_predictions,
+)
 from .keywords import DOC_TYPE_DEFAULT, DOC_TYPE_PRIOR, KEYWORDS
 
 _DEFAULT_WEIGHT = 0.8
@@ -49,21 +58,37 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--max-chars", type=int, default=2000, help="chars of text to scan")
     ap.add_argument("--out", type=str, default=str(PRED_DIR / "rule_based.csv"))
+    ap.add_argument(
+        "--stems-file",
+        default=None,
+        help="newline-separated list of stems to classify (appends to the "
+        "existing rule_based.csv, skipping stems already predicted)",
+    )
     args = ap.parse_args()
 
     meta = load_meta()
-    stems = usable_stems()
+    if args.stems_file:
+        stems = read_stems_file(args.stems_file)
+        already = load_predictions("rule_based")
+        stems = [s for s in stems if s not in already]
+        if not stems:
+            print("No new stems to classify (all already predicted).")
+            return
+    else:
+        stems = usable_stems()
+
     preds, confs = {}, {}
     for stem in stems:
-        from .data_utils import load_text
-
         text = load_text(stem, args.max_chars)
-        doc_type = meta[stem].get("doc_type", "PS")
+        doc_type = meta.get(stem, {}).get("doc_type", "PS")
         label, conf = classify(text, doc_type)
         preds[stem] = label
         confs[stem] = conf
 
-    out = write_predictions("rule_based", preds, confs)
+    if args.stems_file:
+        out = append_predictions("rule_based", preds, confs)
+    else:
+        out = write_predictions("rule_based", preds, confs)
     print(f"Wrote {len(preds)} predictions -> {out}")
 
 

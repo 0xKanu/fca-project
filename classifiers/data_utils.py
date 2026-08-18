@@ -69,3 +69,51 @@ def write_predictions(method: str, preds: dict[str, str], conf: dict[str, float]
             for stem in preds:
                 w.writerow([stem, preds[stem]])
     return out
+
+
+def load_predictions(method: str) -> dict[str, str]:
+    """stem -> predicted label from data/predictions/{method}.csv ({} if absent)."""
+    path = PRED_DIR / f"{method}.csv"
+    if not path.exists():
+        return {}
+    with open(path) as f:
+        return {r["stem"]: r["label"] for r in csv.DictReader(f)}
+
+
+def append_predictions(
+    method: str, preds: dict[str, str], conf: dict[str, float] | None = None
+):
+    """Merge new predictions into the existing {method}.csv (idempotent).
+
+    Stems already present keep their previous prediction; new stems are
+    appended. Used by the incremental pipeline for new documents only.
+    """
+    PRED_DIR.mkdir(parents=True, exist_ok=True)
+    path = PRED_DIR / f"{method}.csv"
+    merged: dict[str, tuple[str, str | None]] = {}
+    if path.exists():
+        with open(path) as f:
+            for r in csv.DictReader(f):
+                merged[r["stem"]] = (r["label"], r.get("confidence"))
+    for stem in preds:
+        if stem in merged:
+            continue  # preserve existing predictions (idempotent)
+        c = f"{conf.get(stem, 0.0):.4f}" if conf else None
+        merged[stem] = (preds[stem], c)
+    with open(path, "w", newline="") as f:
+        w = csv.writer(f)
+        if conf is not None:
+            w.writerow(["stem", "label", "confidence"])
+            for stem, (label, c) in merged.items():
+                w.writerow([stem, label, c if c is not None else "0.0000"])
+        else:
+            w.writerow(["stem", "label"])
+            for stem, (label, _) in merged.items():
+                w.writerow([stem, label])
+    return path
+
+
+def read_stems_file(path: str) -> list[str]:
+    """Newline-separated stem list (blank lines and # comments ignored)."""
+    with open(path) as f:
+        return [ln.strip() for ln in f if ln.strip() and not ln.strip().startswith("#")]

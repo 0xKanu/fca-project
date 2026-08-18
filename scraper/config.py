@@ -47,7 +47,8 @@ HTML_DIR = os.path.join(BASE_DIR, "data", "html")
 METADATA_DIR = os.path.join(BASE_DIR, "data", "metadata")
 TEXT_DIR = os.path.join(BASE_DIR, "data", "text")
 LOGS_DIR = os.path.join(BASE_DIR, "data", "logs")
+PREDICTIONS_DIR = os.path.join(BASE_DIR, "data", "predictions")
 
 # Create directories if they don't exist
-for dir_path in [INDEX_DIR, PDFS_DIR, HTML_DIR, METADATA_DIR, TEXT_DIR, LOGS_DIR]:
+for dir_path in [INDEX_DIR, PDFS_DIR, HTML_DIR, METADATA_DIR, TEXT_DIR, LOGS_DIR, PREDICTIONS_DIR]:
     os.makedirs(dir_path, exist_ok=True)
