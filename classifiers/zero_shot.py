@@ -31,7 +31,11 @@ SYSTEM_PROMPT = (
     "assign exactly one label. Reply with JSON only."
 )
 
-# v1 prompt - USER OWNS THIS. Edit freely; keep the JSON contract.
+# v1.1 prompt - USER OWNS THIS. Edit freely; keep the JSON contract.
+# v1.1 additions (from the 5-doc test review):
+#   rule 2 note: final rules on an existing regime = amendment;
+#   rule 3 note: guidance attached to a CP is still guidance (fixes the
+#   technical-annex mislabel); rule 7: label by the headline action.
 USER_PROMPT_TEMPLATE = """Classify the FCA document below into exactly one of these change types:
 
 - new_rule: creates a NEW obligation, permission, regime or reporting requirement that did not exist before.
@@ -42,11 +46,12 @@ USER_PROMPT_TEMPLATE = """Classify the FCA document below into exactly one of th
 
 Decision rules:
 1. A Consultation Paper is consultation even if it describes proposed rules.
-2. A Policy Statement that changes rules is amendment UNLESS it introduces a brand-new obligation/regime (then new_rule). Use the paper's own wording: "amends"/"changes"/"updates" -> amendment; "introduces"/"creates"/"establishes" -> new_rule.
+2. A Policy Statement that changes rules is amendment UNLESS it introduces a brand-new obligation/regime (then new_rule). Use the paper's own wording: "amends"/"changes"/"updates" -> amendment; "introduces"/"creates"/"establishes" -> new_rule. Making FINAL rules on an existing regime is amendment even if the paper also contains a discussion/consultation section.
 3. Finalised Guidance is guidance UNLESS the same document contains binding rule changes (then amendment).
 4. A feedback statement with no resulting rule is no_change.
 5. Handbook Notices are almost always amendment.
-6. Draft Q&As and technical annexes are guidance.
+6. Draft Q&As and technical annexes are guidance. A technical annex, diagram or draft Q&A attached to a Consultation Paper is guidance, NOT consultation.
+7. Label by the document's HEADLINE action - the principal change it makes - not by a single new obligation it happens to mention, and not by the existence of a comment/discussion section. When a document mixes effects, choose the DOMINANT effect as stated in the abstract/feedback summary.
 
 Document type: {doc_type}
 

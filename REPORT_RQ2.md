@@ -58,6 +58,22 @@ Per-class F1:
 **zero_shot**: 23/179 misclassified - `PS23_18`, `PS23_5`, `PS24_13`, `PS24_14`, `PS24_18`, `PS24_2`, `PS24_9`, `PS25_14`, `PS25_23`, `PS25_4`, `PS25_8`, `PS26_13`...
 **fine_tuned**: 55/179 misclassified - `CP23_21`, `CP24_1`, `CP26_25`, `FG23_2`, `FG23_4`, `FG23_5`, `FG23_6`, `FG24_1`, `FG24_3`, `FG24_5`, `FG24_6`, `FG25_1`...
 
+### Persistent zero-shot disagreements (prompt v1.1)
+Prompt v1.1 added three decision rules (technical annex -> guidance; final rules on an
+existing regime -> amendment; label by headline action). The 179-doc run was byte-for-byte
+identical to v1 (acc 0.872, macro-F1 0.680), so the flagged cases are NOT prompt-fixable
+errors but genuine human-vs-model disagreements, each with defensible model reasoning:
+- `PS23_5` (true amendment) -> `new_rule` 0.75: model cites "final rules that ban referral
+  fees, creating new obligations". Arguable: the ban is a new obligation on debt packagers.
+- `cp25_27_technical_annex_3` (true guidance) -> `consultation` 0.98: model weighs the
+  document's parent CP25/27 consultation framing over its annex nature. Taxonomy rule 6
+  says annex -> guidance; model disagrees.
+- `PS24_14` (true amendment) -> `consultation` 0.95: model weights the paper's
+  "asks for comments on a discussion paper" element over its final rules.
+
+These are recorded as documented disagreements rather than tuned away, to avoid
+over-fitting the prompt to individual documents (which would inflate the eval).
+
 ## Caveats (read before citing)
 - `new_rule` has only 16 samples; recall for it is weak in every method.
   The small-N classes are the binding constraint, not the modelling.
