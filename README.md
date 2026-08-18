@@ -122,7 +122,15 @@ alternative. It is shipped **`workflow_dispatch`-only** (the 6-hourly `schedule`
 is commented out) so it never fires unattended and burns Actions minutes. To
 enable production cron, follow the steps in the workflow file's header: the
 runner starts from an empty `data/` (gitignored), so you must commit the index
-and set `GROQ_API_KEY`/`GCS_BUCKET` secrets first.
+and set `GROQ_API_KEY`/`GCS_BUCKET`/`GCS_KEY` secrets first.
+
+> **Verified limitation (2026-08-18):** the FCA returns **HTTP 403 to
+> GitHub-hosted runner IP ranges** — the identical request (same URL, same
+> User-Agent) returns 200 from a residential IP. A `workflow_dispatch` run
+> executes the full plumbing (checkout, deps, GCS credential wiring, pipeline,
+> artifact upload) but the index step fetches 0 records. Real cloud polling
+> needs a self-hosted runner on a non-blocked IP or an FCA-permitted proxy;
+> local cron (Option 1) is the production detection path.
 
 ## Classifier comparison (RQ2)
 
