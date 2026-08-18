@@ -1,0 +1,58 @@
+{
+  "method": "rule_based",
+  "n": 179,
+  "accuracy": 0.8156,
+  "macro_f1": 0.5957,
+  "majority_baseline_acc": 0.4358,
+  "per_class_f1": {
+    "new_rule": 0.5385,
+    "amendment": 0.7455,
+    "consultation": 0.9167,
+    "guidance": 0.7778,
+    "no_change": 0.0
+  },
+  "confusion_matrix": [
+    [
+      7,
+      7,
+      1,
+      1,
+      0
+    ],
+    [
+      2,
+      41,
+      10,
+      1,
+      0
+    ],
+    [
+      0,
+      1,
+      77,
+      0,
+      0
+    ],
+    [
+      1,
+      7,
+      2,
+      21,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  ],
+  "labels": [
+    "new_rule",
+    "amendment",
+    "consultation",
+    "guidance",
+    "no_change"
+  ]
+}
