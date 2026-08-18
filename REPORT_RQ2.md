@@ -27,7 +27,7 @@ does each compare against a trivial majority-class baseline?
 | method | status | accuracy | macro-F1 |
 |---|---|---|---|
 | rule_based | acc 0.816 | 0.816 | 0.596 |
-| zero_shot | pending | 0.000 | 0.000 |
+| zero_shot | acc 0.872 | 0.872 | 0.680 |
 | fine_tuned | pending | 0.000 | 0.000 |
 | *majority-class baseline* | - | 0.436 | - |
 
@@ -39,12 +39,18 @@ Per-class F1:
 - `consultation` F1=0.917
 - `guidance` F1=0.778
 - `no_change` F1=0.000
-**zero_shot** - pending.
+**zero_shot** (n=179):
+- `new_rule` F1=0.811
+- `amendment` F1=0.843
+- `consultation` F1=0.975
+- `guidance` F1=0.769
+- `no_change` F1=0.000
 **fine_tuned** - pending.
 
 ## Error analysis
 
 **rule_based**: 33/179 misclassified - `CP23_17`, `PS23_15`, `PS23_3`, `PS23_4`, `PS23_6`, `PS23_8`, `PS24_13`, `PS24_14`, `PS24_16`, `PS24_6`, `PS24_8`, `PS25_14`...
+**zero_shot**: 23/179 misclassified - `PS23_18`, `PS23_5`, `PS24_13`, `PS24_14`, `PS24_18`, `PS24_2`, `PS24_9`, `PS25_14`, `PS25_23`, `PS25_4`, `PS25_8`, `PS26_13`...
 
 ## Caveats (read before citing)
 - `new_rule` has only 16 samples; recall for it is weak in every method.
