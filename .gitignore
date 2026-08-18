@@ -15,3 +15,7 @@ data/logs/
 fine_tuned_results.zip
 data_text_labelling.tar.gz
 *.Zone.Identifier
+
+# GCP service-account keys - NEVER commit
+fca-policy-detection-*.json
+*service_account*.json
