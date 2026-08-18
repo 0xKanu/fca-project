@@ -96,7 +96,9 @@ def classify_doc(client, doc_type: str, text: str, model: str) -> tuple[str, flo
             model=model,
             messages=messages,
             temperature=0,
-            max_tokens=200,
+            # gpt-oss is a reasoning model: it spends tokens thinking before
+            # the answer, so 200 is too small (yields empty/broken JSON).
+            max_tokens=1024,
             response_format={"type": "json_object"},
         )
         content = resp.choices[0].message.content

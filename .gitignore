@@ -10,3 +10,8 @@ data/html/
 data/metadata/
 data/text/
 data/logs/
+
+# Colab/upload artifacts
+fine_tuned_results.zip
+data_text_labelling.tar.gz
+*.Zone.Identifier
